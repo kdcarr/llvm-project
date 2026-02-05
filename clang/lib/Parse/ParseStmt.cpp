@@ -343,6 +343,18 @@ Retry:
     // a new scope.
     return StmtEmpty();
 
+  // Experimental guard keyword for monadic binding and mandatory divergence
+  case tok::kw_guard:
+    if (!getLangOpts().ExperimentalGuardKeyword) {
+      Tok.setKind(tok::identifier);
+      return ParseExprStatement(StmtCtx);
+    }
+    ProhibitAttributes(CXX11Attrs);
+    ProhibitAttributes(GNUAttrs);
+    llvm::errs() << "Debug: parser found guard block exiting\n";
+    exit(0);
+    break;
+
   case tok::kw_try:                 // C++ 15: try-block
     return ParseCXXTryBlock();
 
@@ -2543,6 +2555,14 @@ bool Parser::trySkippingFunctionBody() {
   PA.Commit();
   return true;
 }
+
+/*StmtResult Parser::ParseGuardBlock(ParseScope &BodyScope) {
+  assert(Tok.is(tok::kw_guard) && "Expected 'guard'");
+  llvm::errs << "Debug: parser found guard block\n";
+  SourceLocation GuardLoc = ConsumeToken();
+  StmtResult GuardBlock(ParseCompoundStatement());
+  return ParseGuardBlockCommon(TryLoc);
+}*/
 
 StmtResult Parser::ParseCXXTryBlock() {
   assert(Tok.is(tok::kw_try) && "Expected 'try'");
