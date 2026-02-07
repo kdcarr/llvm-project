@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "../../../llvm/lib/TableGen/TGLexer.h"
 #include "clang/AST/PrettyDeclStackTrace.h"
 #include "clang/Basic/Attributes.h"
 #include "clang/Basic/PrettyStackTrace.h"
