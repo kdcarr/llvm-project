@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "../../../llvm/lib/TableGen/TGLexer.h"
 #include "clang/AST/PrettyDeclStackTrace.h"
 #include "clang/Basic/Attributes.h"
 #include "clang/Basic/PrettyStackTrace.h"
@@ -351,9 +352,7 @@ Retry:
     }
     ProhibitAttributes(CXX11Attrs);
     ProhibitAttributes(GNUAttrs);
-    llvm::errs() << "Debug: parser found guard block exiting\n";
-    exit(0);
-    break;
+    return ParseGuardStatement(StmtCtx);
 
   case tok::kw_try:                 // C++ 15: try-block
     return ParseCXXTryBlock();
@@ -1418,6 +1417,68 @@ struct MisleadingIndentationChecker {
   }
 };
 
+}
+
+StmtResult Parser::ParseGuardStatement(ParsedStmtContext StmtCtx) {
+  assert(Tok.is(tok::kw_guard) && "Expected 'guard'");
+
+  // parse decl group
+  const SourceLocation DeclBegin = ConsumeToken();
+  SourceLocation DeclEnd;
+  ParsedAttributes DeclAttrs(getAttrFactory());
+  MaybeParseCXX11Attributes(DeclAttrs);
+  MaybeParseGNUAttributes(DeclAttrs);
+  ParsedAttributes DeclSpecAttrs(getAttrFactory());
+  MaybeParseCXX11Attributes(DeclSpecAttrs);
+  MaybeParseGNUAttributes(DeclAttrs);
+  const DeclGroupPtrTy DGroup = ParseSimpleDeclaration(DeclaratorContext::Guard, DeclEnd,
+                                              DeclAttrs,DeclSpecAttrs,false);
+  const StmtResult DeclStmt = Actions.ActOnDeclStmt(DGroup, DeclBegin, DeclEnd);
+
+  // parse else keyword
+  if (Tok.isNot(tok::kw_else)) {
+    Diag(Tok, diag::err_expected) << tok::kw_else;
+    return StmtError();
+  }
+  ConsumeToken();
+
+  // parse the optional monad identifiers
+  SmallVector<IdentifierInfo *, 4> MonadIds;
+  if (Tok.is(tok::l_paren)) {
+    const auto NumDecls = DGroup.get().getDeclGroup().size();
+    const SourceLocation LParenLoc = ConsumeParen();
+    SourceLocation MonadIdLoc;
+    while (Tok.is(tok::identifier)) {
+      MonadIds.push_back(Tok.getIdentifierInfo());
+      MonadIdLoc = ConsumeToken();
+      if (Tok.is(tok::comma))
+        ConsumeToken();
+    }
+    if (ExpectAndConsume(tok::r_paren, diag::err_expected_rparen_after)) {
+      SkipUntil(tok::l_brace, StopAtSemi | StopBeforeMatch);
+    }
+    const SourceLocation RParenLoc = Tok.getLocation();
+    if (!MonadIds.empty() && MonadIds.size() != NumDecls) {
+      Diag(MonadIdLoc, diag::err_guard_capture_count)
+          << MonadIds.size() << NumDecls
+          << SourceRange(LParenLoc, RParenLoc);
+      return StmtError();
+    }
+  } else if (Tok.is(tok::identifier)) {
+    const SourceLocation IdLoc = Tok.getLocation();
+    Diag(IdLoc, diag::err_expected_lparen_after) << "else";
+    SkipUntil(tok::l_brace, StopAtSemi | StopBeforeMatch);
+    return StmtError();
+  }
+  // push scope for the else block
+  ParseScope ElseScope(this, Scope::DeclScope | Scope::ControlScope);
+  const SourceLocation ElseBlockLoc = Tok.getLocation();
+  Actions.ActOnGuardElseBindings(getCurScope(), MonadIds, DGroup, ElseBlockLoc);
+
+  const StmtResult ElseBlock = ParseCompoundStatement();
+  Actions.ActOnGuardElseBlock(Tok.getLocation(), ElseBlock.get());
+
+  return Actions.ActOnGuardStmt(DeclBegin,DeclEnd, DeclStmt.get());
 }
 
 StmtResult Parser::ParseIfStatement(SourceLocation *TrailingElseLoc) {
@@ -2555,14 +2616,6 @@ bool Parser::trySkippingFunctionBody() {
   PA.Commit();
   return true;
 }
-
-/*StmtResult Parser::ParseGuardBlock(ParseScope &BodyScope) {
-  assert(Tok.is(tok::kw_guard) && "Expected 'guard'");
-  llvm::errs << "Debug: parser found guard block\n";
-  SourceLocation GuardLoc = ConsumeToken();
-  StmtResult GuardBlock(ParseCompoundStatement());
-  return ParseGuardBlockCommon(TryLoc);
-}*/
 
 StmtResult Parser::ParseCXXTryBlock() {
   assert(Tok.is(tok::kw_try) && "Expected 'try'");

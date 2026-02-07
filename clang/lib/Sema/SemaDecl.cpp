@@ -41,6 +41,7 @@
 #include "clang/Sema/CXXFieldCollector.h"
 #include "clang/Sema/DeclSpec.h"
 #include "clang/Sema/DelayedDiagnostic.h"
+#include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/ParsedTemplate.h"
@@ -8445,7 +8446,9 @@ NamedDecl *Sema::ActOnVariableDeclarator(
     CompleteMemberSpecialization(NewVD, Previous);
 
   emitReadOnlyPlacementAttrWarning(*this, NewVD);
-
+  if (D.getContext() == DeclaratorContext::Guard) {
+    NewVD->addAttr(AnnotateAttr::CreateImplicit(this->Context, "is_guard_variable",nullptr, 0 , D.getBeginLoc()));
+  }
   return NewVD;
 }
 
@@ -14039,6 +14042,51 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init, bool DirectInit) {
     } else if (auto *CXXDirectInit = dyn_cast<CXXParenListInitExpr>(Init)) {
       Args = CXXDirectInit->getInitExprs();
       InitializedFromParenListExpr = true;
+    }
+    if (VDecl->hasAttr<AnnotateAttr>() &&
+        // FIXME: is setting an annotation the right way to do this?
+        // other options include changing the method to accept a DeclaratorContext
+        RealDecl->getAttr<AnnotateAttr>()->getAnnotation() == "is_guard_variable") {
+      // NOTE: the goal here is to save the monadic type
+      // ie 'std::optional<int>' before the VarDecl becomes the value_type 'int'
+      QualType MonadType = Init->getType();
+      GuardMonadTypes[VDecl->getLocation().getRawEncoding()] = MonadType;
+      const CXXRecordDecl *RecordDecl = MonadType->getAsCXXRecordDecl();
+      if (not RecordDecl)
+        return; // TODO: error type?
+      IdentifierInfo &VTI = Context.Idents.get("value_type");
+      DeclarationName Name(&VTI);
+      LookupResult R(*this, Name, VDecl->getLocation(), LookupTagName);
+      if (!LookupQualifiedName(R, const_cast<CXXRecordDecl *>(RecordDecl))) {
+        return; // TODO: error type doesn't contain value_type?
+      }
+      auto *TypeDef = R.getAsSingle<TypedefNameDecl>();
+      if (not TypeDef) {
+        return; // TODO: value_type is not typedef?
+      }
+      QualType InnerType = TypeDef->getUnderlyingType();
+      QualType DeclType = VDecl->getType();
+      if (DeclType->isReferenceType()) {
+        DeclType = DeclType->getPointeeType();
+      }
+      if (!Context.hasSameType(DeclType.getUnqualifiedType(), InnerType.getUnqualifiedType())) {
+        Diag(VDecl->getLocation(), diag::err_guard_type_mismatch)
+          << DeclType << InnerType;
+      }
+      // TODO: do we need to manage this better? where does the monad live?
+      ExprResult Unwrapped = BuildUnaryOp(getCurScope(), Init->getBeginLoc(), UO_Deref, Init);
+      if (Unwrapped.isInvalid()) return;
+
+      Init = Unwrapped.get();
+      const InitializationKind Kind = InitializationKind::CreateDirect(VDecl->getLocation(),
+                                                           SourceLocation(),
+                                                           SourceLocation());
+      InitializationSequence Seq(*this, Entity, Kind, Init);
+      ExprResult Result = Seq.Perform(*this, Entity, Kind, Init);
+
+      if (Result.isUsable()) {
+        VDecl->setInit(Result.get());
+      }
     }
 
     InitializationSequence InitSeq(*this, Entity, Kind, Args,

@@ -41,6 +41,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Analysis/DDG.h"
 
 using namespace clang;
 using namespace sema;
@@ -945,6 +946,74 @@ public:
     EvaluatedExprVisitor<CommaVisitor>::VisitBinaryOperator(E);
   }
 };
+}
+
+bool Sema::isTerminatingStmt(Stmt *S) const {
+  if (!S)
+    return false;
+  S = S->IgnoreContainers();
+  if (isa<ReturnStmt>(S) or isa<CXXThrowExpr>(S))
+    return true;
+  if (isa<BreakStmt>(S)) {
+    return getCurScope()->getBreakParent() != nullptr;
+  }
+  if (isa<ContinueStmt>(S)) {
+    return getCurScope()->getContinueParent() != nullptr;
+  }
+  if (auto *CE = dyn_cast<CallExpr>(S)) {
+    if (auto *FD = CE->getDirectCallee()) {
+      if (FD->isNoReturn()) return true;
+    }
+  }
+  return false;
+}
+
+void Sema::ActOnGuardElseBlock(SourceLocation EndLoc, Stmt* ElseBlock) {
+  bool FallsThrough = true;
+  if (auto *CS = dyn_cast<CompoundStmt>(ElseBlock)) {
+    if (CS->size() > 0) {
+      if (Stmt *Last = CS->body_back();
+          isTerminatingStmt(Last)) {
+        FallsThrough = false;
+      }
+    }
+  }
+  if (FallsThrough) {
+    Diag(EndLoc, diag::err_guard_else_must_terminate);
+  }
+}
+
+void Sema::ActOnGuardElseBindings(Scope *S,
+                                   SmallVectorImpl<IdentifierInfo *> &IdList,
+                                   DeclGroupPtrTy DGroup,
+                                   SourceLocation LParenLoc) {
+  DeclGroup& Decls = DGroup.get().getDeclGroup();
+  if (IdList.size() > 0 and IdList.size() != Decls.size())
+    return;
+  for (size_t i = 0; i < Decls.size(); i++) {
+    const VarDecl *VD = cast<VarDecl>(Decls[i]);
+    // look into our guard monad-type map in sema::
+    const QualType MonadType = GuardMonadTypes.lookup(VD->getLocation().getRawEncoding());
+    VarDecl *NewVD = VarDecl::Create(
+      Context,
+      CurContext,
+      LParenLoc, // Start of the capture group
+      LParenLoc, // Location of the specific identifier
+      IdList[i],
+      MonadType,
+      nullptr,
+      SC_None
+    );
+    PushOnScopeChains(NewVD, S);
+  }
+  GuardMonadTypes.clear();
+}
+
+StmtResult Sema::ActOnGuardStmt(SourceLocation GuardBegin, SourceLocation DeclEnd, Stmt* DeclStmt)
+{
+  llvm::errs() << "DEBUG: ActOnGuardStmt()\n";
+  exit(0);
+  return StmtEmpty();//GuardStmt(GuardBegin, DeclStmt, ElseDecls, ElseBlock);
 }
 
 StmtResult Sema::ActOnIfStmt(SourceLocation IfLoc,

@@ -1885,4 +1885,8 @@ def err_hlsl_number_literal_underflow : Error<
   "float literal has a magnitude that is too small to be represented as a float type">;
 def err_hlsl_rootsig_non_zero_flag : Error<"flag value is neither a literal 0 nor a named value">;
 
+// experimental monadic binding and mandatory divergence
+def err_guard_capture_count : Error<
+  "capture identifier count (%0) in guard statment does not match declaration count (%1)">;
+
 } // end of Parser diagnostics
