@@ -7390,6 +7390,8 @@ public:
                                  SourceLocation &LParenLoc,
                                  SourceLocation &RParenLoc);
 
+  StmtResult ParseGuardStatement(ParsedStmtContext StmtCtx);
+
   /// ParseIfStatement
   /// \verbatim
   ///       if-statement: [C99 6.8.4.1]

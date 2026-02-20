@@ -13906,4 +13906,12 @@ def err_cuda_device_kernel_launch_not_supported
 def err_cuda_device_kernel_launch_require_rdc
     : Error<"kernel launch from __device__ or __global__ function requires "
             "relocatable device code (i.e. requires -fgpu-rdc)">;
+
+// experimental monadic binding and mandatory divergence
+def err_guard_type_mismatch : Error<
+    "guard statement declaration type %0 does not match monad value_type %1">;
+
+def err_guard_else_must_terminate : Error<
+    "guard statement 'else' must terminate the current scope">;
+
 } // end of sema component.

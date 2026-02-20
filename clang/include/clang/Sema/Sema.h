@@ -11031,6 +11031,8 @@ public:
   /// value.
   bool checkAndRewriteMustTailAttr(Stmt *St, const Attr &MTA);
 
+  StmtResult ActOnGuardStmt(SourceLocation DeclBegin, SourceLocation DeclEnd, Stmt* DeclStmt);
+
   StmtResult ActOnIfStmt(SourceLocation IfLoc, IfStatementKind StatementKind,
                          SourceLocation LParenLoc, Stmt *InitStmt,
                          ConditionResult Cond, SourceLocation RParenLoc,
@@ -11259,11 +11261,18 @@ public:
   RecordDecl *CreateCapturedStmtRecordDecl(CapturedDecl *&CD,
                                            SourceLocation Loc,
                                            unsigned NumParams);
-
 private:
   /// Check whether the given statement can have musttail applied to it,
   /// issuing a diagnostic and returning false if not.
   bool checkMustTailAttr(const Stmt *St, const Attr &MTA);
+  bool isTerminatingStmt(Stmt *S) const;
+  // FIXME: until we find another way ..
+  llvm::DenseMap<unsigned, QualType> GuardMonadTypes;
+  void ActOnGuardElseBlock(SourceLocation EndLoc, Stmt *ElseBlock);
+  void ActOnGuardElseBindings(Scope *S,
+                               SmallVectorImpl<IdentifierInfo *> &IdList,
+                               DeclGroupPtrTy DGroup,
+                               SourceLocation LParenLoc);
 
   /// Check if the given expression contains 'break' or 'continue'
   /// statement that produces control flow different from GCC.

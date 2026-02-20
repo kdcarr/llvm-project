@@ -2359,7 +2359,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
   if (FirstDecl)
     DeclsInGroup.push_back(FirstDecl);
 
-  bool ExpectSemi = Context != DeclaratorContext::ForInit;
+  bool ExpectSemi = not (Context == DeclaratorContext::ForInit or
+    Context == DeclaratorContext::Guard);
 
   // If we don't have a comma, it is either the end of the list (a ';') or an
   // error, bail out.
@@ -2433,6 +2434,10 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
     // Otherwise things are very confused and we skip to recover.
     if (!isDeclarationSpecifier(ImplicitTypenameContext::No))
       SkipMalformedDecl();
+  }
+
+  if (Context == DeclaratorContext::Guard) {
+    return Actions.BuildDeclaratorGroup(DeclsInGroup);
   }
 
   return Actions.FinalizeDeclaratorGroup(getCurScope(), DS, DeclsInGroup);
@@ -3067,6 +3072,7 @@ Parser::getDeclSpecContextFromDeclaratorContext(DeclaratorContext Context) {
   case DeclaratorContext::LambdaExpr:
   case DeclaratorContext::LambdaExprParameter:
   case DeclaratorContext::RequiresExpr:
+  case DeclaratorContext::Guard:
     return DeclSpecContext::DSC_normal;
   }
 
